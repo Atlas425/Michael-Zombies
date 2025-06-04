@@ -1,0 +1,1366 @@
+loadstring(game:HttpGet('https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source'))()
+local ESPLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/BWG1/EspLibrary/refs/heads/main/Main.lua"))();
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Attrixx/FreeScripts/main/YTUILib1.lua"))():init("PeterHook")
+local Aim = Library:Tab("Combat")
+local Visuals = Library:Tab("Visuals")
+local Client = Library:Tab("Client")
+local Misc = Library:Tab("Misc")
+local PlayerFeatures = Misc:Section("Player Features")
+local combatFeatures = Aim:Section("Combat Features")
+local AttachmentSelector = Misc:Section("Attachment Selector")
+local Aimbot = Aim:Section("Aimbot Settings")
+local Esp = Visuals:Section("Zombie Esp Settings")
+local otherESP = Visuals:Section("Misc ESP")
+local Sounds = Client:Section("Custom Sounds")
+local ClientChams = Client:Section("Client Visuals")
+local Movement = Client:Section("Movement")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local charV = game.Players.LocalPlayer.Character
+local players = game.Workspace.Ignore.Zombies
+local player = game.Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local site = false
+local grip = false
+local suppressor = false
+local memory = true
+local silent = false
+local aimToggled = false
+local weaponChams = false
+local headSound = false
+local omnisprintToggled = false
+local slowfallToggled = false
+local autoshootToggled = false
+local autoReloadToggled = false
+local infiniteJump = false
+local instantReloadToggled = false
+local fastFire = false
+local boxESP = false
+local automaticGun = false
+local modal = true
+local manipulationToggled = false
+local zombieNametag = false
+local fovCircle = nil
+local snapline = nil
+local highlight
+local omnisprintWalkspeed = 12
+local omnisprintJumpPower = 5
+
+local clonedTools = game.ReplicatedStorage.Framework.Guns:Clone()
+clonedTools.Name = "ClonedTools"
+clonedTools.Parent = game.ReplicatedStorage.Framework
+
+local function storeOriginalValues()
+	local guns = game.ReplicatedStorage.Framework.Guns
+	for _, gun in pairs(guns:GetChildren()) do
+        if gun.Name ~= "Flamethrower" and gun.Name ~= "_PAP_Flamethrower" then
+            local module = gun.Module.Settings
+            local m = require(module)
+            gun:SetAttribute("RPM", m.RPM)
+            gun:SetAttribute("FireType", m.FIRE_TYPE)
+        end
+	end
+end
+
+local function resetRPM()
+	local guns = game.ReplicatedStorage.Framework.Guns
+	for _, gun in pairs(guns:GetChildren()) do
+        if gun.Name ~= "Flamethrower" and gun.Name ~= "_PAP_Flamethrower" then
+            local module = gun.Module.Settings
+            local m = require(module)
+            local attribute = gun:GetAttribute("RPM")
+            m.RPM = attribute
+        end
+	end
+end
+
+storeOriginalValues()
+
+wait(3)
+
+game.CoreGui:FindFirstChild("PeterHook").Parent = game.Players.LocalPlayer:FindFirstChild("PlayerGui")
+game.Players.LocalPlayer:FindFirstChild("PlayerGui"):FindFirstChild("PeterHook").ResetOnSpawn = false
+
+local function findClosestZombieHeadSilent()
+    local mousePos = game:GetService("UserInputService"):GetMouseLocation()
+    local closestZombieHead = nil
+    local closestDistance = math.huge
+
+    for _, zombie in ipairs(workspace.Ignore.Zombies:GetChildren()) do
+        if zombie:IsA("Model") then
+            local head = zombie:FindFirstChild("Head")
+            if head then
+                local headScreenPosition, onScreen = workspace.CurrentCamera:WorldToViewportPoint(head.Position)
+                if onScreen then
+                    local distance = (Vector2.new(headScreenPosition.X, headScreenPosition.Y) - mousePos).Magnitude
+                    if distance < closestDistance then
+                        closestZombieHead = head
+                        closestDistance = distance
+                    end
+                end
+            end
+        end
+    end
+
+    return closestZombieHead
+end
+
+local function isClosestZombieHeadInFOV()
+    if not fovCircle or fovCircle == nil then
+        return true
+    end
+
+    local closestZombieHead = findClosestZombieHeadSilent()
+
+    if not closestZombieHead then
+        return false
+    end
+
+    local headScreenPosition, onScreen = workspace.CurrentCamera:WorldToViewportPoint(closestZombieHead.Position)
+    
+    if not onScreen and fovCircle.Radius == 360 or not onScreen and not fovCircle or not onScreen and fovCircle == nil then
+        return true
+    end
+
+    local fovCircleCenter = Vector2.new(workspace.CurrentCamera.ViewportSize.X / 2, workspace.CurrentCamera.ViewportSize.Y / 2)
+    local headScreenPosition2D = Vector2.new(headScreenPosition.X, headScreenPosition.Y)
+    local distanceToCenter = (headScreenPosition2D - fovCircleCenter).Magnitude
+
+    return distanceToCenter <= fovCircle.Radius
+end
+
+local function removeFOVCircle()
+    if fovCircle then
+        fovCircle:Remove()
+        fovCircle = nil
+    end
+end
+
+local function createFOVCircle(fovFactor)
+    removeFOVCircle()
+    
+    fovCircle = Drawing.new("Circle")
+    fovCircle.Thickness = 2
+    fovCircle.NumSides = 64
+    fovCircle.Radius = (fovFactor / 180) * workspace.CurrentCamera.ViewportSize.Y / 2
+    fovCircle.Filled = false
+    fovCircle.Color = Color3.fromRGB(255, 152, 220)
+	fovCircle.Transparency = 0.9
+    
+    local function updateFOVCirclePosition()
+        fovCircle.Position = Vector2.new(workspace.CurrentCamera.ViewportSize.X / 2, workspace.CurrentCamera.ViewportSize.Y / 2)
+    end
+    
+    updateFOVCirclePosition()
+    
+    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateFOVCirclePosition)
+    
+    fovCircle.Visible = true
+end
+
+local function createSnapline()
+    if snapline then snapline:Remove() end
+
+    snapline = Drawing.new("Line")
+    snapline.Thickness = 2
+    snapline.Color = Color3.fromRGB(255, 152, 220)
+    snapline.Visible = false
+	snapline.Transparency = 0.9
+end
+
+local function updateSnapline()
+    if not snapline then return end
+    
+    local closestZombieHead = findClosestZombieHeadSilent()
+    
+    if closestZombieHead then
+        local headScreenPosition, onScreen = workspace.CurrentCamera:WorldToViewportPoint(closestZombieHead.Position)
+        local mousePos = game:GetService("UserInputService"):GetMouseLocation()
+
+        local distanceToMouse = (Vector2.new(headScreenPosition.X, headScreenPosition.Y) - mousePos).Magnitude
+
+        if fovCircle and fovCircle ~= nil and distanceToMouse <= fovCircle.Radius and onScreen then
+            snapline.From = mousePos
+            snapline.To = Vector2.new(headScreenPosition.X, headScreenPosition.Y)
+            snapline.Visible = true
+		elseif not fovCircle then
+            snapline.From = mousePos
+            snapline.To = Vector2.new(headScreenPosition.X, headScreenPosition.Y)
+            snapline.Visible = true
+		else
+			snapline.Visible = false
+        end
+    else
+        snapline.Visible = false
+    end
+end
+
+local function removeSnapline()
+    if snapline then
+        snapline:Remove()
+        snapline = nil
+    end
+end
+
+local function createModal()
+	if modal then
+		local newModal = Instance.new("TextButton")
+		newModal.Parent = game.Players.LocalPlayer:FindFirstChild("PlayerGui"):FindFirstChild("PeterHook")
+		newModal.Modal = true
+		newModal.Name = "MouseModal"
+	else
+		foundModal = game.Players.LocalPlayer:FindFirstChild("PlayerGui"):FindFirstChild("PeterHook"):FindFirstChild("MouseModal")
+		if foundModal then
+			foundModal:Destroy()
+		end
+	end
+end
+
+createModal()
+
+UIS.InputBegan:Connect(function(input)
+	if input.KeyCode == Enum.KeyCode.B then
+		game.Players.LocalPlayer:FindFirstChild("PlayerGui"):FindFirstChild("PeterHook").Main.Visible = not game.Players.LocalPlayer:FindFirstChild("PlayerGui"):FindFirstChild("PeterHook").Main.Visible
+		modal = not modal
+		createModal()
+	end
+end)
+
+Aimbot:Dropdown("Aim Style", {"Memory", "Autofire", "Silent",}, "Memory", function(value)
+	if value == tostring("Memory") then
+		memory = true
+		autoshootToggled = false
+		silent = false
+	elseif value == tostring("Autofire") then
+		autoshootToggled = true
+		memory = false
+		silent = false
+	elseif value == tostring("Silent") then
+		autoshootToggled = false
+		memory = false
+		silent = true
+	end
+end)
+
+local fovCircleFOVValue = 90
+local fovCircleToggled = false
+
+Aimbot:Toggle("FOV Circle", false, function(value)
+	fovCircleToggled = value
+
+	if fovCircleToggled then
+		createFOVCircle(fovCircleFOVValue)
+	else
+		removeFOVCircle()
+	end
+end)
+
+Aimbot:Toggle("Snaplines", false, function(value)
+	local connection
+
+	if value then
+		createSnapline()
+		connection = game:GetService("RunService").RenderStepped:Connect(updateSnapline)
+	else
+		removeSnapline()
+		connection = nil
+	end
+end)
+
+Aimbot:Slider("FOV Circle", 0, 90, 360, function(value)
+	fovCircleFOVValue = value
+
+	if fovCircleToggled then
+		removeFOVCircle()
+		createFOVCircle(value)
+	end
+end)
+
+Aimbot:Toggle("Manipulation (Autofire / Silent)", false, function(value)
+    manipulationToggled = value
+end)
+
+local gmt = getrawmetatable(game)
+setreadonly(gmt, false)
+local oldNamecall = gmt.__namecall
+
+gmt.__namecall = newcclosure(function(self, ...)
+	local Args = {...}
+	local method = getnamecallmethod()
+
+	if tostring(self) == "FireBullet" and tostring(method) == "FireServer" and silent and aimToggled then
+		local closestZombieHead = findClosestZombieHeadSilent()
+		if closestZombieHead and isClosestZombieHeadInFOV() then
+			Args[1] = closestZombieHead.Position
+		end
+		return self.FireServer(self, unpack(Args))
+	end
+
+	return oldNamecall(self, ...)
+end)
+
+PlayerFeatures:Keybind("Sit", "X", function()
+	local hum = game.Players.LocalPlayer.Character:FindFirstChild("Humanoid")
+	if hum then
+		hum.Sit = true
+	end
+end)
+
+Esp:Toggle("Nametag", false, function(value)
+	zombieNametag = value
+
+	for _, zombie in pairs(game.Workspace.Ignore.Zombies:GetChildren()) do
+		if zombieNametag and zombie:IsA("Model") then
+			ESPLib.addNpcName(zombie)
+		elseif zombie:IsA("Model") then
+			ESPLib.removeNpcName(zombie)
+		end
+	end
+end)
+
+game.Workspace.Ignore.Zombies.ChildAdded:Connect(function(child)
+	if child:IsA("Model") then
+		if zombieNametag then
+			wait(0.1)
+			ESPLib.addNpcName(child)
+		end
+	end
+end)
+
+Esp:Toggle("Chams", false, function(value)
+	ESPLib.ESP_SETTINGS.glowChamsEnabled = value
+
+	if value then
+		for _, zombie in pairs(game.Workspace.Ignore.Zombies:GetChildren()) do
+			if zombie:IsA("Model") then
+				ESPLib.addGlowChams(zombie)
+			end
+		end
+	else
+		for _, zombie in pairs(game.Workspace.Ignore.Zombies:GetChildren()) do
+			ESPLib.removeGlowChams(zombie)
+		end
+	end
+end)
+
+Esp:Toggle("Corner Box", false, function(value)
+    ESPLib.ESP_SETTINGS.boxEspEnabled = value
+
+    if ESPLib.ESP_SETTINGS.boxEspEnabled then
+        for _, zombie in pairs(game.Workspace.Ignore.Zombies:GetChildren()) do
+            if zombie:IsA("Model") then
+                ESPLib.addCornerBox(zombie)
+            end
+        end
+    end
+end)
+
+game.Workspace.Ignore.Zombies.ChildAdded:Connect(function(child)
+	if ESPLib.ESP_SETTINGS.glowChamsEnabled and child:IsA("Model") then
+		wait(0.1)
+		ESPLib.addGlowChams(child)
+	end
+
+    if ESPLib.ESP_SETTINGS.boxEspEnabled then
+        ESPLib.addCornerBox(child)
+    end
+end)
+
+local function createHighlight()
+	while true do
+		wait(1)
+		local zombiesFolder = game.Workspace.Ignore.Zombies
+		for _, zombie in pairs(zombiesFolder:GetChildren()) do
+			if highlight and not zombie:FindFirstChildOfClass("Highlight") then
+				local highlights = Instance.new("Highlight")
+				highlights.Parent = zombie
+				highlights.DepthMode = "AlwaysOnTop"
+				highlights.Name = "HighlightESP"
+				highlights.FillColor = Color3.fromRGB(255, 7, 240)
+				highlights.OutlineColor = Color3.fromRGB(24, 89, 255)
+			elseif highlight == false then
+				local highlightFound = zombie:FindFirstChildOfClass("Highlight")
+				if highlightFound then
+					highlightFound:Destroy()
+				end
+			end
+		end
+	end
+end
+
+coroutine.wrap(createHighlight)()
+
+otherESP:Toggle("Mystery Box Chams", false, function(value)
+	local boxESP = value
+	if boxESP then
+		local mysterybox = game.Workspace._MapComponents:WaitForChild("MysteryBox")
+		if not mysterybox:FindFirstChild("Highlight") then
+			ESPLib.addHighlight(mysterybox)
+		end
+	else
+		local mysterybox = game.Workspace._MapComponents:FindFirstChild("MysteryBox")
+
+		if mysterybox:FindFirstChild("Highlight") then
+			ESPLib.removeHighlight(mysterybox)
+		end
+	end
+end)
+
+game.Workspace.DescendantRemoving:Connect(function(descendant)
+	if descendant.Name == "_MapComponents" then
+		spawn(function()
+			game.Workspace:WaitForChild("_MapComponents"):WaitForChild("MysteryBox")
+			ESPLib.addHighlight(game.Workspace._MapComponents.MysteryBox)
+		end)
+	end
+end)
+
+otherESP:Toggle("Building Part Chams", false, function(value)
+	local partChams = value
+	if partChams then
+		local parts = game.Workspace._Parts
+		parts.ChildAdded:Connect(function(child)
+			if not child:FindFirstChild("Highlight") then
+				wait(1)
+				ESPLib.addHighlight(child)
+			end
+		end)
+		for _, part in pairs(parts:GetChildren()) do
+			if not part:FindFirstChild("Highlight") then
+				ESPLib.addHighlight(part)
+			end
+		end
+	else
+		local parts = game.Workspace._Parts
+		for _, part in pairs(parts:GetChildren()) do
+			local chams = part:FindFirstChild("Highlight")
+			if chams then
+				chams:Destroy()
+			end
+		end
+	end
+end)
+
+combatFeatures:Toggle("Automatic Weapon", false, function(value)
+	automaticGun = value
+	if automaticGun then
+		local guns = game.ReplicatedStorage.Framework.Guns
+		for _, gun in pairs(guns:GetChildren()) do
+            if gun.Name ~= "Flamethrower" and gun.Name ~= "_PAP_Flamethrower" then
+                local module = gun.Module.Settings
+                local m = require(module)
+                m.FIRE_TYPE = "AUTO"
+            end
+		end
+	else
+		local guns = game.ReplicatedStorage.Framework.Guns
+		for _, gun in pairs(guns:GetChildren()) do
+            if gun.Name ~= "Flamethrower" and gun.Name ~= "_PAP_Flamethrower" then
+                local module = gun.Module.Settings
+                local m = require(module)
+                local storedValue = gun:GetAttribute("FireType")
+                m.FIRE_TYPE = storedValue
+            end
+		end
+	end
+end)
+
+combatFeatures:Toggle("Fast Fire", false, function(value)
+	fastFire = value
+	if fastFire then
+		local guns = game.ReplicatedStorage.Framework.Guns
+
+		for _, gun in pairs(guns:GetChildren()) do
+            if gun.Name ~= "Flamethrower" and gun.Name ~= "_PAP_Flamethrower" then
+                local module = gun.Module.Settings
+                local m = require(module)
+                m.RPM = 5000
+				m.PENETRATION = math.huge
+            end
+		end
+	else
+		resetRPM()
+	end
+end)
+
+local function removeRecoil()
+	local gunsFolder = game.ReplicatedStorage.Framework.Guns
+	for _, gun in pairs(gunsFolder:GetChildren()) do
+		if gun.Name ~= "Flamethrower" and gun.Name ~= "_PAP_Flamethrower" then
+			local gunModule = require(gun.Module.Settings)
+
+			local zeroRecoil = {
+				IDLE = function() return Vector3.new(0, 0, 0) end,
+				CROUCH = function() return Vector3.new(0, 0, 0) end,
+				AIM = function() return Vector3.new(0, 0, 0) end
+			}
+
+			gunModule.CAMERA_RECOIL = zeroRecoil
+			gunModule.RIG_RECOIL = zeroRecoil
+		end
+	end
+end
+
+local function removeSpread()
+	local gunsFolder = game.ReplicatedStorage.Framework.Guns
+	for _, gun in pairs(gunsFolder:GetChildren()) do
+		if gun.Name ~= "Flamethrower" and gun.Name ~= "_PAP_Flamethrower" then
+			local gunModule = require(gun.Module.Settings)
+
+			local zeroSpread = {
+				DEFAULT = 0,
+				MIN = 0,
+				MAX = 0,
+				CROUCH_REDUCTION = 0,
+				AIM_REDUCTION = 0,
+				WALK_ADDITION = 0
+			}
+
+			gunModule.SPREAD = zeroSpread
+		end
+	end
+end
+
+combatFeatures:Toggle("No Recoil", false, function(value)
+	local recoil = value
+	if recoil then
+		removeRecoil()
+	end
+end)
+
+combatFeatures:Toggle("No Spread", false, function(value)
+	local noSpread = value
+	if noSpread then
+		removeSpread()
+	end
+end)
+
+local function addAttachments()
+	while true do
+		wait(1)
+		local guns = game.Players.LocalPlayer.Character:FindFirstChild("CharStats"):FindFirstChild("GunInventory")
+		if guns then
+			for _, gun in pairs(guns:GetChildren()) do
+				if site then
+					gun:SetAttribute("Sight", "ACOG")
+				end
+				if suppressor then
+					gun:SetAttribute("Barrel", "Suppressor")
+				end
+				if grip then
+					gun:SetAttribute("Side", "Angled Grip")
+				end
+			end
+		end
+	end
+end
+
+coroutine.wrap(addAttachments)()
+
+local function removeAttachments()
+	local guns = game.Players.LocalPlayer.Character.CharStats.GunInventory
+	for _, gun in pairs(guns:GetChildren()) do
+		if not site then
+			gun:SetAttribute("Sight", "")
+		end
+		if not suppressor then
+			gun:SetAttribute("Barrel", "")
+		end
+		if not grip then
+			gun:SetAttribute("Side", "")
+		end
+	end
+end
+
+AttachmentSelector:Toggle("Suppressor", false, function(value)
+	suppressor = value
+	if not suppressor then
+		removeAttachments()
+	end
+end)
+
+AttachmentSelector:Toggle("Grip", false, function(value)
+	grip = value
+
+	if not grip then
+		removeAttachments()
+	end
+end)
+
+AttachmentSelector:Toggle("ACOG", false, function(value)
+	site = value
+
+	if not site then
+		removeAttachments()
+	end
+end)
+
+local playerWalkspeed = game.Players.LocalPlayer.Character.Humanoid.WalkSpeed
+local playerJumpHeight = game.Players.LocalPlayer.Character.Humanoid.JumpHeight
+local playerJumpPower = game.Players.LocalPlayer.Character.Humanoid.JumpPower
+
+local function resetValues()
+	local localPlayer = game.Players.LocalPlayer
+	local character = localPlayer.Character
+	if character and character:FindFirstChild("Humanoid") then
+		character.Humanoid.WalkSpeed = playerWalkspeed
+		character.Humanoid.JumpPower = playerJumpPower
+		character.Humanoid.JumpHeight = playerJumpHeight
+	end
+end
+
+resetValues()
+
+Movement:Toggle("Omnisprint", false, function(value)
+	omnisprintToggled = value
+	if not omnisprintToggled then
+		resetValues()
+	end
+end)
+
+local r = 255
+local g = 0
+local b = 0
+local weaponchamtransparency = 0.15
+local changeRate = 5
+local activeWeapon = nil
+local activeChamConnection = nil
+local frameCounter = 0
+
+local function updateColor()
+    if r > 0 and b == 0 then
+        r -= changeRate
+        g += changeRate
+    elseif g > 0 and r == 0 then
+        g -= changeRate
+        b += changeRate
+    elseif b > 0 and g == 0 then
+        b -= changeRate
+        r += changeRate
+    end
+
+    r = math.clamp(r, 0, 255)
+    g = math.clamp(g, 0, 255)
+    b = math.clamp(b, 0, 255)
+end
+
+local function applyWeaponChams(weapon)
+	if weaponChams then
+
+		if weapon and weapon ~= nil then
+			for _, part in pairs(weapon:GetDescendants()) do
+				if part:IsA("BasePart") and part.Transparency ~= 1 then
+					part.Transparency = weaponchamtransparency
+					part.Color = Color3.fromRGB(r, g, b)
+					part.Material = Enum.Material.ForceField
+				end
+
+				if part:IsA("Folder") and part.Name == "AttachmentsVisuals" then
+					for _, p in pairs(part:GetDescendants()) do
+						if p:IsA("BasePart") and p.Transparency ~= 1 then
+							p.Transparency = weaponchamtransparency
+							p.Color = Color3.fromRGB(r, g, b)
+							p.Material = Enum.Material.ForceField
+						end
+					end
+				end
+			end
+		end
+
+		updateColor()
+	end
+end
+
+local function startChamsLoop(weapon)
+    if activeChamConnection then
+        activeChamConnection:Disconnect()
+        activeChamConnection = nil
+    end
+
+    activeChamConnection = game:GetService("RunService").RenderStepped:Connect(function()
+        frameCounter += 1
+        if frameCounter % 10 == 0 then
+            if not weapon or not weapon.Parent then
+                if activeChamConnection then
+                    activeChamConnection:Disconnect()
+                    activeChamConnection = nil
+                    return
+                end
+            end
+
+            applyWeaponChams(weapon)
+        end
+    end)
+end
+
+spawn(function()
+    game.Workspace.Ignore:WaitForChild("Camera"):WaitForChild("ArmRig").ChildAdded:Connect(function(child)
+        if child:IsA("Model") then
+            if activeWeapon then
+                if activeChamConnection then
+                    activeChamConnection:Disconnect()
+                    activeChamConnection = nil
+                end
+            end
+
+            activeWeapon = child
+            startChamsLoop(child)
+        end
+    end)
+end)
+
+ClientChams:Toggle("Weapon Chams", false, function(value)
+    weaponChams = value
+
+    if not weaponChams and activeChamConnection then
+        activeChamConnection:Disconnect()
+        activeChamConnection = nil
+    elseif weaponChams and activeWeapon then
+        startChamsLoop(activeWeapon)
+    end
+end)
+
+local handChams = false
+
+local function addHandChams()
+	local armRig = game.Workspace.Ignore:WaitForChild("Camera"):WaitForChild("ArmRig")
+	if armRig then
+			while true do
+				wait(0.05)
+				if handChams and armRig:FindFirstChild("Left Arm") and armRig:FindFirstChild("Right Arm") then
+					armRig["Left Arm"].Transparency = 0.85
+					armRig["Left Arm"].Material = Enum.Material.ForceField
+					armRig["Left Arm"].Color = Color3.fromRGB(r, g, b)
+					armRig["Right Arm"].Transparency = 0.85
+					armRig["Right Arm"].Material = Enum.Material.ForceField
+					armRig["Right Arm"].Color = Color3.fromRGB(r, g, b)
+					local shirt = armRig:FindFirstChild("Shirt")
+					if shirt then
+						shirt:Destroy()
+					end
+				end
+			end
+	end
+end
+
+coroutine.wrap(addHandChams)()
+
+local function removeHandChams()
+	local armRig = game.Workspace.Ignore:WaitForChild("Camera"):WaitForChild("ArmRig")
+	if armRig then
+		armRig["Left Arm"].Transparency = 0
+		armRig["Left Arm"].Material = Enum.Material.Plastic
+		armRig["Left Arm"].Color = Color3.fromRGB(91, 93, 105)
+		armRig["Right Arm"].Transparency = 0
+		armRig["Right Arm"].Material = Enum.Material.Plastic
+		armRig["Right Arm"].Color = Color3.fromRGB(91, 93, 105)
+	end
+end
+
+ClientChams:Toggle("Hand Chams", false, function(value)
+	handChams = value
+
+	if not handChams then
+		removeHandChams()
+	end
+end)
+
+Movement:Slider("Omnisprint Walkspeed", 0, 16, 100, function(value)
+	omnisprintWalkSpeed = value
+end)
+
+Movement:Slider("Omnisprint Jump Height", 0, 7, 100, function(value)
+	omnisprintJumpPower = value
+end)
+
+Aimbot:Toggle("Enabled", false, function(value)
+	aimToggled = value
+end)
+
+Movement:Toggle("Slow Fall", false, function(value)
+	slowfallToggled = value
+end)
+
+local volumeSlider = 1
+
+local function addCustomSounds()
+	Rust = Instance.new("Sound")
+	Rust.Parent = game.ReplicatedStorage
+	Rust.SoundId = "rbxassetid://5043539486"
+	Rust.Volume = volumeSlider
+
+	Fatality = Instance.new("Sound")
+	Fatality.Parent = game.ReplicatedStorage
+	Fatality.SoundId = "rbxassetid://6607142036"
+	Fatality.Volume = volumeSlider
+
+	COD = Instance.new("Sound")
+	COD.Parent = game.ReplicatedStorage
+	COD.SoundId = "rbxassetid://5952120301"
+	COD.Volume = volumeSlider
+
+	Pop = Instance.new("Sound")
+	Pop.Parent = game.ReplicatedStorage
+	Pop.SoundId = "rbxassetid://198598793"
+	Pop.Volume = volumeSlider
+
+	Osu = Instance.new("Sound")
+	Osu.Parent = game.ReplicatedStorage
+	Osu.SoundId = "rbxassetid://7149255551"
+	Osu.Volume = volumeSlider
+end
+
+addCustomSounds()
+
+local selectedSound = Rust
+
+Sounds:Toggle("Custom Sounds", false, function(value)
+	headSound = value
+end)
+
+Sounds:Dropdown("Sounds", {"Rust", "Fatality", "COD", "Pop", "Osu"}, "Rust", function(value)
+	if value == tostring("Rust") then
+		selectedSound = Rust
+	elseif value == tostring("Fatality") then
+		selectedSound = Fatality
+	elseif value == tostring("COD") then
+		selectedSound = COD
+	elseif value == tostring("Pop") then
+		selectedSound = Pop
+	elseif value == tostring("Osu") then
+		selectedSound = Osu
+	end
+end)
+
+Sounds:Slider("Volume", 0, 100, 200, function(value)
+	volumeSlider = value / 100
+	
+	for _, sound in pairs(game.ReplicatedStorage:GetChildren()) do
+		if sound:IsA("Sound") and sound.Name == "Sound" then
+			sound.Volume = volumeSlider
+		end
+	end
+end)
+
+Movement:Toggle("Infinite Jump", false, function(value)
+	infiniteJump = value
+end)
+
+local noclipParts = {
+	"Head",
+	"Torso",
+	"SliderBall"
+}
+
+local noclipToggled = false
+
+local function applyNoclip()
+	noclipToggled = not noclipToggled
+	local localchar = game.Players.LocalPlayer.Character
+
+	if localchar then
+		for _, part in pairs(localchar:GetChildren()) do
+			if table.find(noclipParts, part.Name) then
+				part.CanCollide = false
+			end
+		end
+	end
+end
+
+local function removeNoclip()
+	noclipToggled = not noclipToggled
+	local localchar = game.Players.LocalPlayer.Character
+
+	if localchar then
+		for _, part in pairs(localchar:GetChildren()) do
+			if table.find(noclipParts, part.Name) then
+				part.CanCollide = true
+			end
+		end
+	end
+end
+
+local function torsoCanCollide()
+    while true do
+		local torso = game.Players.LocalPlayer.Character:FindFirstChild("Torso")
+        if torso then
+            torso.CanCollide = not noclipToggled
+        end
+        wait(0.1)
+    end
+end
+
+coroutine.wrap(torsoCanCollide)()
+
+Movement:Keybind("Noclip", "N", function()
+    if not noclipToggled then
+		applyNoclip()
+	else
+		removeNoclip()
+	end
+end)
+
+combatFeatures:Toggle("Instant Reload", false, function(value)
+	instantReloadToggled = value
+	if instantReloadToggled then
+		local guns = game.ReplicatedStorage.Framework.Guns
+		for _, gun in pairs(guns:GetChildren()) do
+            if gun.Name ~= "Flamethrower" and gun.Name ~= "_PAP_Flamethrower" then
+                local module = gun.Module.Settings
+                local m = require(module)
+                m.RELOAD_SPEED = 1000
+            end
+		end
+	else
+		local guns = game.ReplicatedStorage.Framework.Guns
+		for _, gun in pairs(guns:GetChildren()) do
+            if gun.Name ~= "Flamethrower" and gun.Name ~= "_PAP_Flamethrower" then
+                local module = gun.Module.Settings
+                local m = require(module)
+                m.RELOAD_SPEED = 0.5
+            end
+		end
+	end
+end)
+
+combatFeatures:Toggle("Auto Reload", false, function(value)
+	autoReloadToggled = value
+end)
+
+local function instantReload()
+	local character = Players.LocalPlayer.Character
+	if character and character:FindFirstChild("Grip") then
+		if not character.Grip:FindFirstChild("Flamethrower") then
+			character.Remotes.Reload:FireServer()
+		end
+	end
+end
+
+local function instantReloadCoroutine() ------------------CHANGE INTO GETPROPERTYCHANGEDSIGNAL---------------------------------------------------------------------------------------------------------
+	while true do
+		wait()
+		if autoReloadToggled then
+			instantReload()
+		end
+	end
+end
+
+local function findClosestZombieHead(position)
+	local closestZombieHead = nil
+	local closestDistance = math.huge
+
+	for _, zombie in ipairs(Workspace.Ignore.Zombies:GetChildren()) do
+		if zombie:IsA("Model") then
+			local head = zombie:FindFirstChild("Head")
+			if head then
+				local distance = (head.Position - position).Magnitude
+				if distance < closestDistance then
+					closestZombieHead = head
+					closestDistance = distance
+				end
+			end
+		end
+	end
+
+	return closestZombieHead
+end
+
+local function fireBullet(endPosition)
+	local args = {
+		[1] = endPosition,
+		[2] = os.time()
+	}
+	ReplicatedStorage.Framework.Remotes.FireBullet:FireServer(unpack(args))
+end
+
+local function isLineOfSightClear(origin, target)
+	local direction = (target - origin).unit
+	local ray = Ray.new(origin, direction * 1000)
+
+	local hit, _ = Workspace:FindPartOnRay(ray, Players.LocalPlayer.Character, true)
+	return hit and hit:IsDescendantOf(Workspace.Ignore.Zombies)
+end
+
+local currentPoints
+
+local function continuousFire()
+	while true do
+		wait()
+		if autoshootToggled and aimToggled then
+			local character = Players.LocalPlayer.Character
+			if character and character:FindFirstChild("HumanoidRootPart") then
+				local closestZombieHead = findClosestZombieHeadSilent()
+				if closestZombieHead then
+					local lineOfSightClear = isLineOfSightClear(character.HumanoidRootPart.Position, closestZombieHead.Position)
+					if lineOfSightClear and isClosestZombieHeadInFOV() then
+						fireBullet(closestZombieHead.Position)
+						if currentPoints and headSound and selectedSound then
+							selectedSound:Play()
+							currentPoints = false
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+local mouse = game.Players.LocalPlayer:GetMouse()
+local camera = game.Workspace.CurrentCamera
+
+local function fireRaycastToClosestZombie()
+    local closestZombieHead = findClosestZombieHead(game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart").Position)
+    local mousePos = Vector2.new(mouse.X, mouse.Y)
+
+    local mouseRay = camera:ScreenPointToRay(mousePos.X, mousePos.Y)
+
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {game.Players.LocalPlayer.Character}
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+
+    local raycastResult = workspace:Raycast(mouseRay.Origin, mouseRay.Direction * 3000, raycastParams)
+
+    if raycastResult and raycastResult.Instance:IsDescendantOf(closestZombieHead.Parent) then
+        return true
+    else
+        return false
+    end
+end
+
+game.Players.LocalPlayer:WaitForChild("PlayerGui"):WaitForChild("GameUI").Default.SelfPlayerCard.Backer.Points:GetPropertyChangedSignal("Text"):Connect(function()
+	currentPoints = true
+end)
+
+spawn(function()
+	local info = game.Players.LocalPlayer:WaitForChild("PlayerGui"):WaitForChild("FrameworkUI"):WaitForChild("Regular"):WaitForChild("AmmoUI"):WaitForChild("WeaponInfo")
+	info.Clip:GetPropertyChangedSignal("Text"):Connect(function()
+		local closestZombieHead = findClosestZombieHead(game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart").Position)
+		local newPoints = tonumber(game.Players.LocalPlayer.PlayerGui.GameUI.Default.SelfPlayerCard.Backer.Points.Text)
+
+		if closestZombieHead then
+			local lineOfSightClear = isLineOfSightClear(game.Players.LocalPlayer.Character.HumanoidRootPart.Position, closestZombieHead.Position)
+			if headSound and currentPoints or autoshootToggled and lineOfSightClear or silent and currentPoints then
+				currentPoints = false
+				selectedSound:Play()
+			end
+		end
+	end)
+end)
+
+local function startCoroutines()
+	spawn(instantReloadCoroutine)
+	spawn(continuousFire)
+end
+
+local function onCharacterAdded(character)
+	startCoroutines()
+end
+
+game.Players.LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+
+if game.Players.LocalPlayer.Character then
+	onCharacterAdded(Players.LocalPlayer.Character)
+end
+
+local function onKeyPress(input, gameProcessedEvent)
+	if infiniteJump and input.KeyCode == Enum.KeyCode.Space then
+		local character = game.Players.LocalPlayer.Character
+		if character and character:IsA("Model") then
+			local humanoid = character:FindFirstChildOfClass("Humanoid")
+			if humanoid then
+				humanoid:Move(Vector3.new(0, 50, 0), false)
+				humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+			end
+		end
+	end
+end
+
+game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessedEvent)
+	if not gameProcessedEvent then
+		onKeyPress(input, gameProcessedEvent)
+	end
+end)
+
+UserInputService = game:GetService("UserInputService")
+RunService = game:GetService("RunService")
+
+local function updateVelocity()
+	local localPlayer = game.Players.LocalPlayer
+	local character = localPlayer.Character
+	if character then
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			local moveDirection = (humanoid.MoveDirection * Vector3.new(1, 0, 1)).unit
+            if humanoid.MoveDirection.magnitude ~= nil and omnisprintWalkSpeed ~= nil and moveDirection ~= nil then
+			    local currentVelocity = humanoid.MoveDirection.magnitude * omnisprintWalkSpeed * moveDirection
+                if currentVelocity ~= nil then
+                    if not (humanoid.MoveDirection.magnitude > 0) then
+                        currentVelocity = Vector3.new(0, 0, 0)
+                    end
+
+                    humanoid.WalkSpeed = omnisprintWalkSpeed
+                    humanoid.JumpPower = omnisprintJumpPower
+
+                    if slowfallToggled and humanoid.RootPart.Velocity.Y < 0 then
+                        humanoid.RootPart.Velocity = Vector3.new(currentVelocity.X, humanoid.RootPart.Velocity.Y * 0.92, currentVelocity.Z)
+                    else
+                        humanoid.RootPart.Velocity = Vector3.new(currentVelocity.X, humanoid.RootPart.Velocity.Y, currentVelocity.Z)
+                    end
+                end
+            end
+		end
+	end
+end
+
+UserInputService.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Keyboard and omnisprintToggled then
+		updateVelocity()
+	end
+end)
+
+RunService.RenderStepped:Connect(function(deltaTime)
+	if omnisprintToggled then
+		updateVelocity()
+	else
+		resetValues()
+	end
+end)
+
+local knifeAura
+
+combatFeatures:Toggle("Knife Aura", false, function(value)
+	knifeAura = value
+end)
+
+local closestZombie
+
+local function findClosestZombie(position)
+	local closestDistance = math.huge
+	closestZombieRoot = nil
+
+	for _, zombie in ipairs(game.Workspace.Ignore.Zombies:GetChildren()) do
+		if zombie:IsA("Model") and zombie:FindFirstChild("HumanoidRootPart") then
+			local rootPart = zombie.HumanoidRootPart
+			local humanoid = zombie:FindFirstChild("Humanoid")
+			if humanoid and humanoid.Health > 0 then
+				local distance = (rootPart.Position - position).Magnitude
+				if distance < closestDistance then
+					closestDistance = distance
+					closestZombieRoot = rootPart
+				end
+			end
+		end
+	end
+end
+
+local function knifeClosest()
+	while true do
+		wait()
+		if knifeAura then
+			local hrp = game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+			if hrp then
+				findClosestZombie(hrp.Position)
+				if closestZombieRoot then
+					pcall(function()
+						game:GetService("ReplicatedStorage").Framework.Remotes.KnifeHitbox:FireServer(closestZombieRoot.Parent)
+					end)
+				end
+			end
+		end
+	end
+end
+
+coroutine.wrap(knifeClosest)()
+
+local player = game.Players.LocalPlayer
+local camera = game.Workspace.CurrentCamera
+local zombiesFolder = game.Workspace.Ignore.Zombies
+
+local UserInputService = game:GetService("UserInputService")
+
+local aimbotActive = false
+
+local function findNearestZombieToMouse()
+	local mouseRay = camera:ScreenPointToRay(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y)
+	local nearestZombie
+	local minDistance = math.huge
+	for _, zombie in pairs(zombiesFolder:GetChildren()) do
+		local humanoidRootPart = zombie:FindFirstChild("HumanoidRootPart")
+		if humanoidRootPart then
+			local distance = (mouseRay:ClosestPoint(humanoidRootPart.Position) - humanoidRootPart.Position).Magnitude
+			if distance < minDistance then
+				nearestZombie = zombie
+				minDistance = distance
+			end
+		end
+	end
+	return nearestZombie
+end
+
+local function updateCameraAim()
+	local nearestZombie = findNearestZombieToMouse()
+	if nearestZombie then
+		local head = nearestZombie:FindFirstChild("Head")
+		if head then
+			local aimDirection = (head.Position - camera.CFrame.Position).unit
+			camera.CFrame = CFrame.new(camera.CFrame.Position, camera.CFrame.Position + aimDirection)
+		end
+	end
+end
+
+local function toggleAimbot()
+	aimbotActive = not aimbotActive
+end
+
+UserInputService.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton2 then
+		toggleAimbot()
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton2 then
+		toggleAimbot()
+	end
+end)
+
+local function adjustCam()
+	while true do
+		wait()
+		local arena = game.Workspace.Ignore.Zombies:FindFirstChild("ArenaEnemies")
+		if arena then
+			arena.Parent = game.Workspace.Ignore
+		end
+		if aimbotActive and memory and aimToggled and isClosestZombieHeadInFOV() then
+			updateCameraAim()
+		end
+	end
+end
+
+coroutine.wrap(adjustCam)()
+
+local isRightMouseButtonHeld = false
+local originalCameraPosition = nil
+
+local gui = Instance.new("ScreenGui")
+gui.Parent = game.Players.LocalPlayer.PlayerGui
+local label = Instance.new("TextLabel")
+label.Size = UDim2.new(0, 200, 0, 50)
+label.Position = UDim2.new(0.5, -100, 0.5, -25)
+label.Text = "MANIPULATED"
+label.Parent = gui
+label.Visible = false
+label.BackgroundTransparency = 1
+label.TextColor3 = Color3.fromRGB(255, 0, 0)
+
+local function calculateTeleportDirection(mousePosition)
+    local closestZombie = nil
+    local closestDistance = math.huge
+    
+    for _, zombie in ipairs(game.Workspace.Ignore.Zombies:GetChildren()) do
+        if zombie.Name == "ArenaEnemies" then
+            zombie.Parent = game.Workspace
+        end
+        if zombie:FindFirstChild("HumanoidRootPart") then
+            local distance = (zombie:FindFirstChild("HumanoidRootPart").Position - mousePosition).Magnitude
+            if distance < closestDistance then
+                closestZombie = zombie
+                closestDistance = distance
+            end
+        end
+    end
+    
+    if closestZombie then
+        return closestZombie.HumanoidRootPart.Position + Vector3.new(0, 5, 0), closestZombie
+    else
+        return nil, nil
+    end
+end
+
+local function teleportPlayer()
+    while true do
+        wait()
+        if isRightMouseButtonHeld then
+            local character = player.Character
+            if character then
+                local mousePos = game:GetService("UserInputService"):GetMouseLocation()
+                local unitRay = game.Workspace.CurrentCamera:ScreenPointToRay(mousePos.X, mousePos.Y)
+                closestZombieHead = findClosestZombieHeadSilent()
+                
+                if not closestZombieHead then
+                    closestZombieHead = findClosestZombieHeadSilent()
+                end
+                
+                if closestZombieHead then
+                    character:WaitForChild("HumanoidRootPart").CFrame = CFrame.new(closestZombieHead.Position) + Vector3.new(0, 7, 0)
+                end
+            end
+        end
+    end
+end
+
+game:GetService("UserInputService").InputBegan:Connect(function(input)
+    if manipulationToggled then
+        if input.UserInputType == Enum.UserInputType.MouseButton2 then
+            local character = player.Character
+            if character then
+                local mousePos = game:GetService("UserInputService"):GetMouseLocation()
+                local unitRay = game.Workspace.CurrentCamera:ScreenPointToRay(mousePos.X, mousePos.Y)
+                local teleportPosition, closestZombie = calculateTeleportDirection(unitRay.Origin + unitRay.Direction * 5000)
+                if closestZombie then
+                    originalCameraPosition = character:WaitForChild("HumanoidRootPart").Position
+                    isRightMouseButtonHeld = true
+                    coroutine.wrap(teleportPlayer)()
+                    game.Workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
+                end
+            end
+        end
+    end
+end)
+
+game:GetService("UserInputService").InputEnded:Connect(function(input)
+    if manipulationToggled then
+        if input.UserInputType == Enum.UserInputType.MouseButton2 then
+
+            isRightMouseButtonHeld = false
+            local character = player.Character
+
+            if character then
+                if game.Workspace.Ignore.Zombies:FindFirstChildOfClass("Model") then
+                    character:WaitForChild("HumanoidRootPart").CFrame = CFrame.new(originalCameraPosition)
+                else
+                    character:WaitForChild("HumanoidRootPart").CFrame = game.Workspace.Ignore:WaitForChild("Camera").CFrame
+                end
+            end
+
+            game.Workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+        end
+    end
+end)
+
+game:GetService("RunService").Heartbeat:Connect(function()
+    if manipulationToggled then
+        local character = player.Character
+        if character then
+            local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+            if humanoidRootPart then
+                local mousePos = game:GetService("UserInputService"):GetMouseLocation()
+                local unitRay = game.Workspace.CurrentCamera:ScreenPointToRay(mousePos.X, mousePos.Y)
+                local _, closestZombie = calculateTeleportDirection(unitRay.Origin + unitRay.Direction * 2000)
+                if closestZombie then
+                    if isClosestZombieHeadInFOV() and isRightMouseButtonHeld then
+                        label.Visible = true
+					elseif fovCircle and fovCircle.Radius == 360 and isRightMouseButtonHeld then
+                        label.Visible = true
+					else
+						label.Visible = false
+                    end
+                else
+                    label.Visible = false
+                end
+            end
+        end
+    end
+end)
